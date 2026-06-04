@@ -101,6 +101,9 @@ jobs:
           gtk2-engines-murrine
           gtk2-engines-pixbuf
           papirus-icon-theme
+          materia-gtk-theme
+          adwaita-icon-theme
+          hicolor-icon-theme
           sassc
           libglib2.0-dev-bin
           libxml2-utils
@@ -119,7 +122,7 @@ jobs:
           firmware-amd-graphics
           EOF
 
-          cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'EOF'
+          cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'HOOKEOF'
           #!/bin/bash
           set -euxo pipefail
 
@@ -133,55 +136,79 @@ jobs:
 
           rm -rf WhiteSur-gtk-theme Tela-circle-icon-theme
 
-          git clone --depth=1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git
-          cd WhiteSur-gtk-theme
+          WHITESUR_LOG="/tmp/whitesur-install.log"
 
-          ./install.sh \
-            -d /usr/share/themes \
-            -t default \
-            -c light \
-            -s standard \
-            --silent-mode \
-          || ./install.sh \
-            -d /usr/share/themes \
-            -t default \
-            -c light \
-            -s standard \
-          || ./install.sh \
-            -d /usr/share/themes
+          if git clone --depth=1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git; then
+            cd /tmp/WhiteSur-gtk-theme
 
-          cd /tmp
-
-          git clone --depth=1 https://github.com/vinceliuice/Tela-circle-icon-theme.git
-          cd Tela-circle-icon-theme
-
-          ./install.sh \
-            -d /usr/share/icons \
-            -c standard \
-          || ./install.sh \
-            -d /usr/share/icons
-
-          cd /tmp
-
-          GTK_THEME_NAME="WhiteSur-Light"
-
-          if [ ! -d "/usr/share/themes/${GTK_THEME_NAME}" ]; then
-            GTK_THEME_NAME="$(find /usr/share/themes -maxdepth 1 -type d -name 'WhiteSur*' -printf '%f\n' | sort | head -n 1 || true)"
+            if ./install.sh -d /usr/share/themes > "${WHITESUR_LOG}" 2>&1; then
+              echo "WhiteSur instalado com sucesso."
+            else
+              echo "WhiteSur falhou. Segue log, mas o build continuará com fallback."
+              cat "${WHITESUR_LOG}" || true
+            fi
+          else
+            echo "Falha ao clonar WhiteSur. O build continuará com fallback."
           fi
+
+          cd /tmp
+
+          TELA_LOG="/tmp/tela-install.log"
+
+          if git clone --depth=1 https://github.com/vinceliuice/Tela-circle-icon-theme.git; then
+            cd /tmp/Tela-circle-icon-theme
+
+            if ./install.sh -d /usr/share/icons > "${TELA_LOG}" 2>&1; then
+              echo "Tela Circle instalado com sucesso."
+            else
+              echo "Tela Circle falhou. Segue log, mas o build continuará com fallback."
+              cat "${TELA_LOG}" || true
+            fi
+          else
+            echo "Falha ao clonar Tela Circle. O build continuará com fallback."
+          fi
+
+          GTK_THEME_NAME=""
+
+          for THEME_CANDIDATE in \
+            "WhiteSur-Light" \
+            "WhiteSur" \
+            "WhiteSur-light" \
+            "Materia-light" \
+            "Materia" \
+            "Adwaita"
+          do
+            if [ -d "/usr/share/themes/${THEME_CANDIDATE}" ]; then
+              GTK_THEME_NAME="${THEME_CANDIDATE}"
+              break
+            fi
+          done
 
           if [ -z "${GTK_THEME_NAME}" ]; then
             GTK_THEME_NAME="Adwaita"
           fi
 
-          ICON_THEME_NAME="Tela-circle"
+          ICON_THEME_NAME=""
 
-          if [ ! -d "/usr/share/icons/${ICON_THEME_NAME}" ]; then
-            ICON_THEME_NAME="$(find /usr/share/icons -maxdepth 1 -type d -name 'Tela-circle*' -printf '%f\n' | sort | head -n 1 || true)"
-          fi
+          for ICON_CANDIDATE in \
+            "Tela-circle" \
+            "Tela-circle-light" \
+            "Tela-circle-dark" \
+            "Papirus" \
+            "Adwaita"
+          do
+            if [ -d "/usr/share/icons/${ICON_CANDIDATE}" ]; then
+              ICON_THEME_NAME="${ICON_CANDIDATE}"
+              break
+            fi
+          done
 
           if [ -z "${ICON_THEME_NAME}" ]; then
-            ICON_THEME_NAME="Papirus"
+            ICON_THEME_NAME="Adwaita"
           fi
+
+          echo "Tema GTK selecionado: ${GTK_THEME_NAME}"
+          echo "Tema de ícones selecionado: ${ICON_THEME_NAME}"
 
           mkdir -p /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
           mkdir -p /etc/skel/.config/gtk-3.0
@@ -231,7 +258,7 @@ jobs:
 
           apt clean
           rm -rf /var/lib/apt/lists/*
-          EOF
+          HOOKEOF
 
           chmod +x config/hooks/normal/9000-aluminium-customization.hook.chroot
 
