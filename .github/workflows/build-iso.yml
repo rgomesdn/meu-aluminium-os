@@ -158,8 +158,7 @@ jobs:
           EOF
 
               chmod +x config/hooks/normal/9000-aluminium-customization.hook.chroot
-
-              lb clean --purge || true
+              
               lb build
 
               ISO_FILE=$(find . -maxdepth 1 -name "*.iso" | head -n 1)
