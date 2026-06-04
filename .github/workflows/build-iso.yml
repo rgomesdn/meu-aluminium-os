@@ -12,9 +12,6 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
       - name: Show disk space before cleanup
         run: df -h
 
@@ -26,45 +23,56 @@ jobs:
           sudo apt clean
           df -h
 
-      - name: Install build tools
+      - name: Build ISO inside Debian Bookworm container
         run: |
-          sudo apt update
-          sudo apt install -y \
-            live-build \
-            debootstrap \
-            debian-archive-keyring \
-            debian-keyring \
-            squashfs-tools \
-            xorriso \
-            isolinux \
-            syslinux-common \
-            git \
-            curl \
-            ca-certificates
+          mkdir -p dist
 
-      - name: Configure Aluminium OS ISO
-        run: |
-          mkdir aluminium-build
-          cd aluminium-build
+          docker run --privileged --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            debian:bookworm \
+            bash -lc '
+              set -e
 
-          lb config noauto \
-            --mode debian \
-            --distribution bookworm \
-            --architectures amd64 \
-            --binary-images iso-hybrid \
-            --archive-areas "main contrib non-free-firmware" \
-            --mirror-bootstrap "http://deb.debian.org/debian/" \
-            --mirror-chroot "http://deb.debian.org/debian/" \
-            --mirror-binary "http://deb.debian.org/debian/" \
-            --mirror-chroot-security "http://security.debian.org/debian-security/" \
-            --mirror-binary-security "http://security.debian.org/debian-security/" \
-            --debian-installer live \
-            --bootappend-live "boot=live components username=aluminium hostname=aluminium-os"
+              export DEBIAN_FRONTEND=noninteractive
 
-          mkdir -p config/package-lists
-          mkdir -p config/hooks/normal
+              apt-get update
+              apt-get install -y \
+                live-build \
+                debootstrap \
+                debian-archive-keyring \
+                debian-keyring \
+                squashfs-tools \
+                xorriso \
+                isolinux \
+                syslinux-common \
+                git \
+                curl \
+                wget \
+                ca-certificates
 
-          cat > config/package-lists/aluminium.list.chroot <<'EOF'
+              rm -rf aluminium-build
+              mkdir aluminium-build
+              cd aluminium-build
+
+              lb config noauto \
+                --mode debian \
+                --distribution bookworm \
+                --architectures amd64 \
+                --binary-images iso-hybrid \
+                --archive-areas "main contrib non-free-firmware" \
+                --mirror-bootstrap "http://deb.debian.org/debian/" \
+                --mirror-chroot "http://deb.debian.org/debian/" \
+                --mirror-binary "http://deb.debian.org/debian/" \
+                --mirror-chroot-security "http://deb.debian.org/debian-security/" \
+                --mirror-binary-security "http://deb.debian.org/debian-security/" \
+                --debian-installer live \
+                --bootappend-live "boot=live components username=aluminium hostname=aluminium-os"
+
+              mkdir -p config/package-lists
+              mkdir -p config/hooks/normal
+
+              cat > config/package-lists/aluminium.list.chroot <<EOF
           xfce4
           xfce4-goodies
           xfce4-whiskermenu-plugin
@@ -87,7 +95,7 @@ jobs:
           papirus-icon-theme
           EOF
 
-          cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'EOF'
+              cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'"'"'EOF'"'"'
           #!/bin/bash
           set -e
 
@@ -110,7 +118,7 @@ jobs:
           mkdir -p /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
           mkdir -p /etc/skel/.config/gtk-3.0
 
-          cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<'XFCEEOF'
+          cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<'"'"'XFCEEOF'"'"'
           <?xml version="1.0" encoding="UTF-8"?>
 
           <channel name="xsettings" version="1.0">
@@ -125,7 +133,7 @@ jobs:
           </channel>
           XFCEEOF
 
-          cat > /etc/skel/.config/gtk-3.0/settings.ini <<'GTK3EOF'
+          cat > /etc/skel/.config/gtk-3.0/settings.ini <<'"'"'GTK3EOF'"'"'
           [Settings]
           gtk-theme-name=WhiteSur-Light
           gtk-icon-theme-name=Tela-circle
@@ -133,14 +141,14 @@ jobs:
           gtk-cursor-theme-name=Adwaita
           GTK3EOF
 
-          cat > /etc/skel/.gtkrc-2.0 <<'GTK2EOF'
+          cat > /etc/skel/.gtkrc-2.0 <<'"'"'GTK2EOF'"'"'
           gtk-theme-name="WhiteSur-Light"
           gtk-icon-theme-name="Tela-circle"
           gtk-font-name="Noto Sans 10"
           gtk-cursor-theme-name="Adwaita"
           GTK2EOF
 
-          cat > /etc/default/zramswap <<'ZRAMEOF'
+          cat > /etc/default/zramswap <<'"'"'ZRAMEOF'"'"'
           ALGO=zstd
           PERCENT=50
           ZRAMEOF
@@ -149,21 +157,16 @@ jobs:
           apt clean
           EOF
 
-          chmod +x config/hooks/normal/9000-aluminium-customization.hook.chroot
+              chmod +x config/hooks/normal/9000-aluminium-customization.hook.chroot
 
-      - name: Build ISO
-        run: |
-          cd aluminium-build
-          sudo lb clean --purge || true
-          sudo lb build
-          ls -lh *.iso || true
+              lb clean --purge || true
+              lb build
 
-      - name: Rename ISO
-        run: |
-          mkdir -p dist
-          ISO_FILE=$(find aluminium-build -maxdepth 1 -name "*.iso" | head -n 1)
-          cp "$ISO_FILE" dist/aluminium-os-debian-xfce-amd64.iso
-          ls -lh dist
+              ISO_FILE=$(find . -maxdepth 1 -name "*.iso" | head -n 1)
+              cp "$ISO_FILE" /workspace/dist/aluminium-os-debian-xfce-amd64.iso
+
+              ls -lh /workspace/dist
+            '
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
