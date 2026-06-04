@@ -1,0 +1,162 @@
+name: Build Aluminium OS ISO
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show disk space before cleanup
+        run: df -h
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt clean
+          df -h
+
+      - name: Install build tools
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            live-build \
+            debootstrap \
+            squashfs-tools \
+            xorriso \
+            isolinux \
+            syslinux-common \
+            git \
+            curl \
+            ca-certificates
+
+      - name: Configure Aluminium OS ISO
+        run: |
+          mkdir aluminium-build
+          cd aluminium-build
+
+          lb config \
+            --distribution bookworm \
+            --architectures amd64 \
+            --binary-images iso-hybrid \
+            --debian-installer live \
+            --archive-areas "main contrib non-free-firmware" \
+            --bootappend-live "boot=live components username=aluminium hostname=aluminium-os"
+
+          mkdir -p config/package-lists
+          mkdir -p config/hooks/normal
+
+          cat > config/package-lists/aluminium.list.chroot <<'EOF'
+          xfce4
+          xfce4-goodies
+          xfce4-whiskermenu-plugin
+          lightdm
+          lightdm-gtk-greeter
+          network-manager
+          network-manager-gnome
+          sudo
+          firefox-esr
+          gnome-software
+          zram-tools
+          git
+          curl
+          wget
+          ca-certificates
+          fonts-noto
+          fonts-noto-color-emoji
+          gtk2-engines-murrine
+          gtk2-engines-pixbuf
+          papirus-icon-theme
+          calamares
+          calamares-settings-debian
+          EOF
+
+          cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'EOF'
+          #!/bin/bash
+          set -e
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          cd /tmp
+
+          rm -rf WhiteSur-gtk-theme Tela-circle-icon-theme
+
+          git clone https://github.com/vinceliuice/WhiteSur-gtk-theme.git
+          cd WhiteSur-gtk-theme
+          ./install.sh -t default -s light -i google
+          cd /tmp
+
+          git clone https://github.com/vinceliuice/Tela-circle-icon-theme.git
+          cd Tela-circle-icon-theme
+          ./install.sh google
+          cd /tmp
+
+          mkdir -p /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
+          mkdir -p /etc/skel/.config/gtk-3.0
+
+          cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<'XFCEEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+
+          <channel name="xsettings" version="1.0">
+            <property name="Net" type="empty">
+              <property name="ThemeName" type="string" value="WhiteSur-Light"/>
+              <property name="IconThemeName" type="string" value="Tela-circle"/>
+            </property>
+            <property name="Gtk" type="empty">
+              <property name="FontName" type="string" value="Noto Sans 10"/>
+              <property name="MonospaceFontName" type="string" value="Noto Sans Mono 10"/>
+            </property>
+          </channel>
+          XFCEEOF
+
+          cat > /etc/skel/.config/gtk-3.0/settings.ini <<'GTK3EOF'
+          [Settings]
+          gtk-theme-name=WhiteSur-Light
+          gtk-icon-theme-name=Tela-circle
+          gtk-font-name=Noto Sans 10
+          gtk-cursor-theme-name=Adwaita
+          GTK3EOF
+
+          cat > /etc/skel/.gtkrc-2.0 <<'GTK2EOF'
+          gtk-theme-name="WhiteSur-Light"
+          gtk-icon-theme-name="Tela-circle"
+          gtk-font-name="Noto Sans 10"
+          gtk-cursor-theme-name="Adwaita"
+          GTK2EOF
+
+          cat > /etc/default/zramswap <<'ZRAMEOF'
+          ALGO=zstd
+          PERCENT=50
+          ZRAMEOF
+
+          rm -rf /tmp/WhiteSur-gtk-theme /tmp/Tela-circle-icon-theme
+          apt clean
+          EOF
+
+          chmod +x config/hooks/normal/9000-aluminium-customization.hook.chroot
+
+      - name: Build ISO
+        run: |
+          cd aluminium-build
+          sudo lb build
+          ls -lh *.iso || true
+
+      - name: Rename ISO
+        run: |
+          mkdir -p dist
+          ISO_FILE=$(find aluminium-build -maxdepth 1 -name "*.iso" | head -n 1)
+          cp "$ISO_FILE" dist/aluminium-os-debian-xfce-amd64.iso
+          ls -lh dist
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aluminium-OS-ISO
+          path: dist/aluminium-os-debian-xfce-amd64.iso
