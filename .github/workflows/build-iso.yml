@@ -32,6 +32,8 @@ jobs:
           sudo apt install -y \
             live-build \
             debootstrap \
+            debian-archive-keyring \
+            debian-keyring \
             squashfs-tools \
             xorriso \
             isolinux \
@@ -45,12 +47,18 @@ jobs:
           mkdir aluminium-build
           cd aluminium-build
 
-          lb config \
+          lb config noauto \
+            --mode debian \
             --distribution bookworm \
             --architectures amd64 \
             --binary-images iso-hybrid \
-            --debian-installer live \
             --archive-areas "main contrib non-free-firmware" \
+            --mirror-bootstrap "http://deb.debian.org/debian/" \
+            --mirror-chroot "http://deb.debian.org/debian/" \
+            --mirror-binary "http://deb.debian.org/debian/" \
+            --mirror-chroot-security "http://security.debian.org/debian-security/" \
+            --mirror-binary-security "http://security.debian.org/debian-security/" \
+            --debian-installer live \
             --bootappend-live "boot=live components username=aluminium hostname=aluminium-os"
 
           mkdir -p config/package-lists
@@ -77,8 +85,6 @@ jobs:
           gtk2-engines-murrine
           gtk2-engines-pixbuf
           papirus-icon-theme
-          calamares
-          calamares-settings-debian
           EOF
 
           cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'EOF'
@@ -148,6 +154,7 @@ jobs:
       - name: Build ISO
         run: |
           cd aluminium-build
+          sudo lb clean --purge || true
           sudo lb build
           ls -lh *.iso || true
 
