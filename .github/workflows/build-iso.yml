@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build:
@@ -12,6 +12,9 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
       - name: Show disk space before cleanup
         run: df -h
 
@@ -23,56 +26,55 @@ jobs:
           sudo apt clean
           df -h
 
-      - name: Build ISO inside Debian Bookworm container
+      - name: Create Debian ISO build script
         run: |
-          mkdir -p dist
+          cat > build-aluminium-inside-debian.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euxo pipefail
 
-          docker run --privileged --rm \
-            -v "$PWD:/workspace" \
-            -w /workspace \
-            debian:bookworm \
-            bash -lc '
-              set -e
+          export DEBIAN_FRONTEND=noninteractive
 
-              export DEBIAN_FRONTEND=noninteractive
+          apt-get update
 
-              apt-get update
-              apt-get install -y \
-                live-build \
-                debootstrap \
-                debian-archive-keyring \
-                debian-keyring \
-                squashfs-tools \
-                xorriso \
-                isolinux \
-                syslinux-common \
-                git \
-                curl \
-                wget \
-                ca-certificates
+          apt-get install -y \
+            live-build \
+            debootstrap \
+            debian-archive-keyring \
+            debian-keyring \
+            squashfs-tools \
+            xorriso \
+            isolinux \
+            syslinux-common \
+            git \
+            curl \
+            wget \
+            ca-certificates
 
-              rm -rf aluminium-build
-              mkdir aluminium-build
-              cd aluminium-build
+          rm -rf /workspace/aluminium-build
+          mkdir -p /workspace/aluminium-build
+          cd /workspace/aluminium-build
 
-              lb config noauto \
-                --mode debian \
-                --distribution bookworm \
-                --architectures amd64 \
-                --binary-images iso-hybrid \
-                --archive-areas "main contrib non-free-firmware" \
-                --mirror-bootstrap "http://deb.debian.org/debian/" \
-                --mirror-chroot "http://deb.debian.org/debian/" \
-                --mirror-binary "http://deb.debian.org/debian/" \
-                --mirror-chroot-security "http://deb.debian.org/debian-security/" \
-                --mirror-binary-security "http://deb.debian.org/debian-security/" \
-                --debian-installer live \
-                --bootappend-live "boot=live components username=aluminium hostname=aluminium-os"
+          lb config noauto \
+            --mode debian \
+            --distribution bookworm \
+            --architectures amd64 \
+            --binary-images iso-hybrid \
+            --archive-areas "main contrib non-free non-free-firmware" \
+            --mirror-bootstrap "http://deb.debian.org/debian/" \
+            --mirror-chroot "http://deb.debian.org/debian/" \
+            --mirror-binary "http://deb.debian.org/debian/" \
+            --mirror-chroot-security "http://security.debian.org/debian-security/" \
+            --mirror-binary-security "http://security.debian.org/debian-security/" \
+            --debian-installer live \
+            --bootappend-live "boot=live components username=aluminium hostname=aluminium-os locales=pt_BR.UTF-8 keyboard-layouts=br"
 
-              mkdir -p config/package-lists
-              mkdir -p config/hooks/normal
+          mkdir -p config/package-lists
+          mkdir -p config/hooks/normal
 
-              cat > config/package-lists/aluminium.list.chroot <<EOF
+          cat > config/package-lists/aluminium.list.chroot <<'EOF'
+          live-boot
+          live-config
+          task-xfce-desktop
           xfce4
           xfce4-goodies
           xfce4-whiskermenu-plugin
@@ -80,51 +82,117 @@ jobs:
           lightdm-gtk-greeter
           network-manager
           network-manager-gnome
+          wireless-tools
+          wpasupplicant
           sudo
           firefox-esr
           gnome-software
+          packagekit
           zram-tools
           git
           curl
           wget
           ca-certificates
+          locales
+          console-setup
+          keyboard-configuration
           fonts-noto
           fonts-noto-color-emoji
           gtk2-engines-murrine
           gtk2-engines-pixbuf
           papirus-icon-theme
+          sassc
+          libglib2.0-dev-bin
+          libxml2-utils
+          dialog
+          optipng
+          imagemagick
+          bc
+          calamares
+          calamares-settings-debian
+          firmware-linux-free
+          firmware-misc-nonfree
+          firmware-realtek
+          firmware-iwlwifi
+          firmware-atheros
+          firmware-brcm80211
+          firmware-amd-graphics
           EOF
 
-              cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'"'"'EOF'"'"'
+          cat > config/hooks/normal/9000-aluminium-customization.hook.chroot <<'EOF'
           #!/bin/bash
-          set -e
+          set -euxo pipefail
 
           export DEBIAN_FRONTEND=noninteractive
+
+          echo "pt_BR.UTF-8 UTF-8" > /etc/locale.gen
+          locale-gen
+          update-locale LANG=pt_BR.UTF-8
 
           cd /tmp
 
           rm -rf WhiteSur-gtk-theme Tela-circle-icon-theme
 
-          git clone https://github.com/vinceliuice/WhiteSur-gtk-theme.git
+          git clone --depth=1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git
           cd WhiteSur-gtk-theme
-          ./install.sh -t default -s light -i google
+
+          ./install.sh \
+            -d /usr/share/themes \
+            -t default \
+            -c light \
+            -s standard \
+            --silent-mode \
+          || ./install.sh \
+            -d /usr/share/themes \
+            -t default \
+            -c light \
+            -s standard \
+          || ./install.sh \
+            -d /usr/share/themes
+
           cd /tmp
 
-          git clone https://github.com/vinceliuice/Tela-circle-icon-theme.git
+          git clone --depth=1 https://github.com/vinceliuice/Tela-circle-icon-theme.git
           cd Tela-circle-icon-theme
-          ./install.sh google
+
+          ./install.sh \
+            -d /usr/share/icons \
+            -c standard \
+          || ./install.sh \
+            -d /usr/share/icons
+
           cd /tmp
+
+          GTK_THEME_NAME="WhiteSur-Light"
+
+          if [ ! -d "/usr/share/themes/${GTK_THEME_NAME}" ]; then
+            GTK_THEME_NAME="$(find /usr/share/themes -maxdepth 1 -type d -name 'WhiteSur*' -printf '%f\n' | sort | head -n 1 || true)"
+          fi
+
+          if [ -z "${GTK_THEME_NAME}" ]; then
+            GTK_THEME_NAME="Adwaita"
+          fi
+
+          ICON_THEME_NAME="Tela-circle"
+
+          if [ ! -d "/usr/share/icons/${ICON_THEME_NAME}" ]; then
+            ICON_THEME_NAME="$(find /usr/share/icons -maxdepth 1 -type d -name 'Tela-circle*' -printf '%f\n' | sort | head -n 1 || true)"
+          fi
+
+          if [ -z "${ICON_THEME_NAME}" ]; then
+            ICON_THEME_NAME="Papirus"
+          fi
 
           mkdir -p /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
           mkdir -p /etc/skel/.config/gtk-3.0
 
-          cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<'"'"'XFCEEOF'"'"'
+          cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<XFCEEOF
           <?xml version="1.0" encoding="UTF-8"?>
 
           <channel name="xsettings" version="1.0">
             <property name="Net" type="empty">
-              <property name="ThemeName" type="string" value="WhiteSur-Light"/>
-              <property name="IconThemeName" type="string" value="Tela-circle"/>
+              <property name="ThemeName" type="string" value="${GTK_THEME_NAME}"/>
+              <property name="IconThemeName" type="string" value="${ICON_THEME_NAME}"/>
             </property>
             <property name="Gtk" type="empty">
               <property name="FontName" type="string" value="Noto Sans 10"/>
@@ -133,39 +201,68 @@ jobs:
           </channel>
           XFCEEOF
 
-          cat > /etc/skel/.config/gtk-3.0/settings.ini <<'"'"'GTK3EOF'"'"'
+          cat > /etc/skel/.config/gtk-3.0/settings.ini <<GTK3EOF
           [Settings]
-          gtk-theme-name=WhiteSur-Light
-          gtk-icon-theme-name=Tela-circle
+          gtk-theme-name=${GTK_THEME_NAME}
+          gtk-icon-theme-name=${ICON_THEME_NAME}
           gtk-font-name=Noto Sans 10
           gtk-cursor-theme-name=Adwaita
           GTK3EOF
 
-          cat > /etc/skel/.gtkrc-2.0 <<'"'"'GTK2EOF'"'"'
-          gtk-theme-name="WhiteSur-Light"
-          gtk-icon-theme-name="Tela-circle"
+          cat > /etc/skel/.gtkrc-2.0 <<GTK2EOF
+          gtk-theme-name="${GTK_THEME_NAME}"
+          gtk-icon-theme-name="${ICON_THEME_NAME}"
           gtk-font-name="Noto Sans 10"
           gtk-cursor-theme-name="Adwaita"
           GTK2EOF
 
-          cat > /etc/default/zramswap <<'"'"'ZRAMEOF'"'"'
+          cat > /etc/default/zramswap <<ZRAMEOF
           ALGO=zstd
           PERCENT=50
           ZRAMEOF
 
+          cat > /etc/sudoers.d/90-aluminium-live-user <<SUDOEOF
+          aluminium ALL=(ALL:ALL) NOPASSWD:ALL
+          SUDOEOF
+
+          chmod 440 /etc/sudoers.d/90-aluminium-live-user
+
           rm -rf /tmp/WhiteSur-gtk-theme /tmp/Tela-circle-icon-theme
+
           apt clean
+          rm -rf /var/lib/apt/lists/*
           EOF
 
-              chmod +x config/hooks/normal/9000-aluminium-customization.hook.chroot
-              
-              lb build
+          chmod +x config/hooks/normal/9000-aluminium-customization.hook.chroot
 
-              ISO_FILE=$(find . -maxdepth 1 -name "*.iso" | head -n 1)
-              cp "$ISO_FILE" /workspace/dist/aluminium-os-debian-xfce-amd64.iso
+          lb build
 
-              ls -lh /workspace/dist
-            '
+          mkdir -p /workspace/dist
+
+          ISO_FILE="$(find . -maxdepth 1 -type f -name '*.iso' | head -n 1)"
+
+          if [ -z "${ISO_FILE}" ]; then
+            echo "ISO não encontrada após o build."
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+          cp "${ISO_FILE}" /workspace/dist/aluminium-os-debian-xfce-amd64.iso
+
+          ls -lh /workspace/dist
+          SCRIPT
+
+          chmod +x build-aluminium-inside-debian.sh
+
+      - name: Build ISO inside Debian Bookworm container
+        run: |
+          mkdir -p dist
+
+          docker run --privileged --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            debian:bookworm \
+            bash /workspace/build-aluminium-inside-debian.sh
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
